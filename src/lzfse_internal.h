@@ -269,6 +269,10 @@ typedef struct {
   lzfse_compressed_block_decoder_state compressed_lzfse_block_state;
   lzvn_compressed_block_decoder_state compressed_lzvn_block_state;
   uncompressed_block_decoder_state uncompressed_block_state;
+  int use_fds;
+  int src_fd;
+  int dst_fd;
+  size_t fd_bytes_written;
 } lzfse_decoder_state;
 
 // MARK: - Block header objects

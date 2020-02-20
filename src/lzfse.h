@@ -22,6 +22,7 @@ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSI
 #ifndef LZFSE_H
 #define LZFSE_H
 
+#include <stdio.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -128,6 +129,11 @@ LZFSE_API size_t lzfse_decode_buffer(uint8_t *__restrict dst_buffer,
                                      const uint8_t *__restrict src_buffer,
                                      size_t src_size,
                                      void *__restrict scratch_buffer);
+
+LZFSE_API size_t lzfse_decode_file(FILE *dst_file,
+                                 FILE *src_file,
+                                 size_t src_size,
+                                 void *__restrict scratch_buffer);
 
 #ifdef __cplusplus
 } /* extern "C" */

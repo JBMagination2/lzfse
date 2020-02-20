@@ -21,6 +21,8 @@ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSI
 
 // LZFSE command line tool
 
+#include <stdio.h>
+
 #if !defined(_POSIX_C_SOURCE) || (_POSIX_C_SOURCE < 200112L)
 #  undef _POSIX_C_SOURCE
 #  define _POSIX_C_SOURCE 200112L
@@ -53,16 +55,6 @@ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSI
 #  include <sys/time.h>
 #  include <unistd.h>
 #endif
-
-// Same as realloc(x,s), except x is freed when realloc fails
-static inline void *lzfse_reallocf(void *x, size_t s) {
-  void *y = realloc(x, s);
-  if (y == 0) {
-    free(x);
-    return 0;
-  }
-  return y;
-}
 
 static double get_time() {
 #if defined(_MSC_VER)
@@ -159,9 +151,7 @@ int main(int argc, char **argv) {
   }
 
   // Load input
-  size_t in_allocated = 0; // allocated in IN
-  size_t in_size = 0;      // used in IN
-  uint8_t *in = 0;         // input buffer
+  size_t out_size = 0;     // used in OUT
   int in_fd = -1;          // input file desc
 
   if (in_file != 0) {
@@ -176,18 +166,7 @@ int main(int argc, char **argv) {
       perror(in_file);
       exit(1);
     }
-    if (fstat(in_fd, &st) != 0) {
-      perror(in_file);
-      exit(1);
-    }
-    if (st.st_size > SIZE_MAX) {
-      fprintf(stderr, "File is too large\n");
-      exit(1);
-    }
-    in_allocated = (size_t)st.st_size;
   } else {
-    // Otherwise, read from stdin, and allocate to 1 MB, grow as needed
-    in_allocated = 1 << 20;
     in_fd = 0;
 #if defined(_WIN32)
     if (setmode(in_fd, O_BINARY) == -1) {
@@ -196,101 +175,7 @@ int main(int argc, char **argv) {
     }
 #endif
   }
-  in = (uint8_t *)malloc(in_allocated);
-  if (in == 0) {
-    perror("malloc");
-    exit(1);
-  }
 
-  while (1) {
-    // re-alloc if needed
-    if (in_size == in_allocated) {
-      if (in_allocated < (100 << 20))
-        in_allocated <<= 1; // double it
-      else
-        in_allocated += (100 << 20); // or add 100 MB if already large
-      in = lzfse_reallocf(in, in_allocated);
-      if (in == 0) {
-        perror("malloc");
-        exit(1);
-      }
-    }
-
-    ptrdiff_t r = read(in_fd, in + in_size, in_allocated - in_size);
-    if (r < 0) {
-      perror("read");
-      exit(1);
-    }
-    if (r == 0)
-      break; // end of file
-    in_size += (size_t)r;
-  }
-
-  if (in_file != 0) {
-    close(in_fd);
-    in_fd = -1;
-  }
-
-  // Size info
-  if (verbosity > 0) {
-    fprintf(stderr, "Input size: %zu B\n", in_size);
-  }
-
-  //  Encode/decode
-  //  Compute size for result buffer; we assume here that encode shrinks size,
-  //  and that decode grows by no more than 4x.  These are reasonable common-
-  //  case guidelines, but are not formally guaranteed to be satisfied.
-  size_t out_allocated = (op == LZFSE_ENCODE) ? in_size : (4 * in_size);
-  size_t out_size = 0;
-  size_t aux_allocated = (op == LZFSE_ENCODE) ? lzfse_encode_scratch_size()
-                                              : lzfse_decode_scratch_size();
-  void *aux = aux_allocated ? malloc(aux_allocated) : 0;
-  if (aux_allocated != 0 && aux == 0) {
-    perror("malloc");
-    exit(1);
-  }
-  uint8_t *out = (uint8_t *)malloc(out_allocated);
-  if (out == 0) {
-    perror("malloc");
-    exit(1);
-  }
-
-  double c0 = get_time();
-  while (1) {
-    if (op == LZFSE_ENCODE)
-      out_size = lzfse_encode_buffer(out, out_allocated, in, in_size, aux);
-    else
-      out_size = lzfse_decode_buffer(out, out_allocated, in, in_size, aux);
-
-    // If output buffer was too small, grow and retry.
-    if (out_size == 0 || (op == LZFSE_DECODE && out_size == out_allocated)) {
-      if (verbosity > 0)
-        fprintf(stderr, "Output buffer was too small, increasing size...\n");
-      out_allocated <<= 1;
-      out = (uint8_t *)lzfse_reallocf(out, out_allocated);
-      if (out == 0) {
-        perror("malloc");
-        exit(1);
-      }
-      continue;
-    }
-
-    break;
-  }
-  double c1 = get_time();
-
-  if (verbosity > 0) {
-    fprintf(stderr, "Output size: %zu B\n", out_size);
-    size_t raw_size = (op == LZFSE_ENCODE) ? in_size : out_size;
-    size_t compressed_size = (op == LZFSE_ENCODE) ? out_size : in_size;
-    fprintf(stderr, "Compression ratio: %.3f\n",
-            (double)raw_size / (double)compressed_size);
-    double ns_per_byte = 1.0e9 * (c1 - c0) / (double)raw_size;
-    double mb_per_s = (double)raw_size / 1024.0 / 1024.0 / (c1 - c0);
-    fprintf(stderr, "Speed: %.2f ns/B, %.2f MB/s\n",ns_per_byte,mb_per_s);
-  }
-
-  // Write output
   int out_fd = -1;
   if (out_file) {
 #if defined(_WIN32)
@@ -312,25 +197,29 @@ int main(int argc, char **argv) {
     }
 #endif
   }
-  for (size_t out_pos = 0; out_pos < out_size;) {
-    ptrdiff_t w = write(out_fd, out + out_pos, out_size - out_pos);
-    if (w < 0) {
-      perror("write");
+  //  Encode/decode
+  //  Compute size for result buffer; we assume here that encode shrinks size,
+  //  and that decode grows by no more than 4x.  These are reasonable common-
+  //  case guidelines, but are not formally guaranteed to be satisfied.
+
+  double c0 = get_time();
+  if (op == LZFSE_ENCODE) {
+      fprintf(stderr, "encode not implemented yet\n");
       exit(1);
-    }
-    if (w == 0) {
-      fprintf(stderr, "Failed to write to output file\n");
-      exit(1);
-    }
-    out_pos += (size_t)w;
+  } else {
+      FILE *outfile = fdopen(out_fd, "w");
+      FILE *infile = fdopen(in_fd, "r");
+      out_size = lzfse_decode_file(outfile, infile, 0, NULL);
+      fclose(infile);
+      fclose(outfile);
   }
+
+  double c1 = get_time();
+
   if (out_file != 0) {
     close(out_fd);
     out_fd = -1;
   }
 
-  free(in);
-  free(out);
-  free(aux);
   return 0; // OK
 }
