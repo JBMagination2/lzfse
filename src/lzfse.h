@@ -130,10 +130,37 @@ LZFSE_API size_t lzfse_decode_buffer(uint8_t *__restrict dst_buffer,
                                      size_t src_size,
                                      void *__restrict scratch_buffer);
 
+/*! @abstract Decompress a stream using LZFSE.
+ *
+ *  @param dst_file
+ *  Destination FILE* stream pointer
+ *
+ *  @param src_file
+ *  Source FILE* stream pointer
+ *
+ *  @param src_size
+ *  Optinal maximum to read from the source buffer in bytes. Pass 0 for unlimited.
+ *
+ *  @param error
+ *  Optional pointer to an error result.  Will be 0 on success, pass NULL if not needed.
+ *
+ *  @param scratch_buffer
+ *  If non-NULL, a pointer to scratch space for the routine to use as workspace;
+ *  the routine may use up to lzfse_decode_scratch_size( ) bytes of workspace
+ *  during its operation, and will not perform any internal allocations. If
+ *  NULL, the routine may allocate its own memory to use during operation via
+ *  a single call to malloc( ), and will release it by calling free( ) prior
+ *  to returning. For most use, passing NULL is perfectly satisfactory, but if
+ *  you require strict control over allocation, you will want to pass an
+ *  explicit scratch buffer.
+ *
+ *  @return
+ *  The number of bytes written to the destination buffer.                    */
 LZFSE_API size_t lzfse_decode_file(FILE *dst_file,
-                                 FILE *src_file,
-                                 size_t src_size,
-                                 void *__restrict scratch_buffer);
+                                   FILE *src_file,
+                                   size_t src_size,
+                                   int *error,
+                                   void *__restrict scratch_buffer);
 
 #ifdef __cplusplus
 } /* extern "C" */

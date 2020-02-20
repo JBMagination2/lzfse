@@ -209,7 +209,8 @@ int main(int argc, char **argv) {
   } else {
       FILE *outfile = fdopen(out_fd, "w");
       FILE *infile = fdopen(in_fd, "r");
-      out_size = lzfse_decode_file(outfile, infile, 0, NULL);
+      int error;
+      out_size = lzfse_decode_file(outfile, infile, 0, &error, NULL);
       fclose(infile);
       fclose(outfile);
   }

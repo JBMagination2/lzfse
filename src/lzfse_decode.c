@@ -55,23 +55,27 @@ size_t lzfse_decode_buffer_with_scratch(uint8_t *__restrict dst_buffer,
 #define DECODE_SRC_CHUNK_SIZE 0x40000
 #define DECODE_DST_CHUNK_SIZE (DECODE_SRC_CHUNK_SIZE * 4)
 size_t lzfse_decode_file_with_scratch(FILE *dst_file, FILE *src_file, size_t src_size,
-                                    void *__restrict scratch_buffer) {
+                                      int *error, void *__restrict scratch_buffer) {
   lzfse_decoder_state *s = (lzfse_decoder_state *)scratch_buffer;
   memset(s, 0x00, sizeof(*s));
 
   uint8_t *src_buf = malloc(DECODE_SRC_CHUNK_SIZE);
-  if (src_buf == NULL)
+  if (src_buf == NULL) {
+      if (error) *error = 1;
       return 0;
+  }
 
   uint8_t *dst_buf = malloc(DECODE_DST_CHUNK_SIZE + LZFSE_ENCODE_MAX_D_VALUE);
-  if (dst_buf == NULL)
+  if (dst_buf == NULL) {
+      if (error) *error = 1;
       return 0;
+  }
   size_t dst_size = DECODE_DST_CHUNK_SIZE;
 
   int nr = fread(src_buf, 1, src_size?(src_size<DECODE_SRC_CHUNK_SIZE?src_size:DECODE_SRC_CHUNK_SIZE):DECODE_SRC_CHUNK_SIZE, src_file);
   if (nr < 0) {
-      perror("read");
-      exit(1);
+      if (error) *error = 2;
+      return 0;
   }
   src_size -= nr;
 
@@ -89,10 +93,10 @@ size_t lzfse_decode_file_with_scratch(FILE *dst_file, FILE *src_file, size_t src
   while (s->end_of_stream == 0) {
       // Decode a block
       int status = lzfse_decode(s);
+      if (error) *error = status;
 
       if (status == LZFSE_STATUS_ERROR) {
-          fprintf(stderr, "lzfse decode error\n");
-          exit(1);
+          return written;
       }
 
       int processed_data = 0;
@@ -101,9 +105,10 @@ size_t lzfse_decode_file_with_scratch(FILE *dst_file, FILE *src_file, size_t src
       if (dst_used > LZFSE_ENCODE_MAX_D_VALUE) {
           int num_to_write = dst_used - LZFSE_ENCODE_MAX_D_VALUE;
           processed_data = 1;
-          if (fwrite(s->dst_begin, 1, num_to_write, dst_file) != num_to_write) {
-              perror("write");
-              exit(1);
+          int nw = fwrite(s->dst_begin, 1, num_to_write, dst_file);
+          if (nw != num_to_write) {
+              if (error) *error = 3;
+              return written + (nw>0?nw:0);
           }
           written += num_to_write;
           memmove(s->dst_begin, s->dst_begin + num_to_write, LZFSE_ENCODE_MAX_D_VALUE);
@@ -116,21 +121,19 @@ size_t lzfse_decode_file_with_scratch(FILE *dst_file, FILE *src_file, size_t src
           processed_data = 1;
           memmove((uint8_t*)s->src_begin, s->src, src_unused);
           s->src = s->src_begin;
-          //fprintf(stderr, "old lmd: %p\n", s->compressed_lzfse_block_state.lmd_in_buf);
-          //s->compressed_lzfse_block_state.lmd_in_buf -= src_used;
-          //fprintf(stderr, "new lmd: %p\n", s->compressed_lzfse_block_state.lmd_in_buf);
       }
       if (!processed_data) {
+          if (error) *error = 4;
           fprintf(stderr, "lzfse not making progress, aborting.  Maybe we need larger buffers?\n");
-          exit(1);
+          return written;
       }
       if (src_unused < DECODE_SRC_CHUNK_SIZE && src_size > 0) {
           size_t size_wanted = DECODE_SRC_CHUNK_SIZE - src_unused;
           size_t size_to_read = src_size?(src_size<size_wanted?src_size:size_wanted):size_wanted;
           nr = fread(src_buf + src_unused, 1, size_to_read, src_file);
           if (nr < 0) {
-              perror("read");
-              exit(1);
+              if (error) *error = 2;
+              return written;
           }
           src_size -= nr;
           s->src_end = s->src + src_unused + nr;
@@ -139,9 +142,10 @@ size_t lzfse_decode_file_with_scratch(FILE *dst_file, FILE *src_file, size_t src
 
   size_t dst_used = s->dst - s->dst_begin;
   if (dst_used > 0) {
-      if (fwrite(s->dst_begin, 1, dst_used, dst_file) != dst_used) {
-          perror("write");
-          exit(1);
+      int nw = fwrite(s->dst_begin, 1, dst_used, dst_file);
+      if (nw != dst_used) {
+          if (error) *error = 3;
+          return written + (nw>0?nw:0);
       }
   }
   free(dst_buf);
@@ -172,7 +176,8 @@ size_t lzfse_decode_buffer(uint8_t *__restrict dst_buffer, size_t dst_size,
   return ret;
 } 
 
-size_t lzfse_decode_file(FILE *dst_file, FILE *src_file, size_t src_size, void *__restrict scratch_buffer) {
+size_t lzfse_decode_file(FILE *dst_file, FILE *src_file, size_t src_size,
+                         int *error, void *__restrict scratch_buffer) {
   int has_malloc = 0;
   size_t ret = 0;
 
@@ -182,9 +187,11 @@ size_t lzfse_decode_file(FILE *dst_file, FILE *src_file, size_t src_size, void *
     scratch_buffer = malloc(lzfse_decode_scratch_size() + 1);
     has_malloc = 1;
   }
-  if (scratch_buffer == NULL)
+  if (scratch_buffer == NULL) {
+    if (error != NULL) *error = 1;
     return 0;
-  ret = lzfse_decode_file_with_scratch(dst_file, src_file, src_size, scratch_buffer);
+  }
+  ret = lzfse_decode_file_with_scratch(dst_file, src_file, src_size, error, scratch_buffer);
   if (has_malloc)
     free(scratch_buffer);
   return ret;
