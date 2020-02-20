@@ -26,9 +26,7 @@ BUILD_DIR := ./build
 BIN_DIR := $(BUILD_DIR)/bin
 OBJ_DIR := $(BUILD_DIR)/obj
 
-LZFSE_AR  := $(BIN_DIR)/liblzfse.a
-LZFSE_LIB := $(BIN_DIR)/liblzfse.dylib
-LZFSE_OBJ := $(OBJ_DIR)/liblzfse_master.o
+LZFSE_LIB := $(BIN_DIR)/liblzfse.a
 LZFSE_CMD := $(BIN_DIR)/lzfse
 LIB_OBJS := $(OBJ_DIR)/lzfse_encode.o  $(OBJ_DIR)/lzfse_decode.o \
             $(OBJ_DIR)/lzfse_encode_base.o $(OBJ_DIR)/lzfse_decode_base.o \
@@ -49,16 +47,10 @@ install: $(LZFSE_LIB) $(LZFSE_CMD)
 	install $(LZFSE_LIB) $(INSTALL_PREFIX)/lib/liblzfse.a
 	install $(LZFSE_CMD) $(INSTALL_PREFIX)/bin/lzfse
 
-$(LZFSE_OBJ): $(LIB_OBJS)
-	$(LD) -r -o $@ $^
-
-$(LZFSE_LIB): $(LZFSE_OBJ)
+$(LZFSE_LIB): $(LIB_OBJS)
 	@[ -d $(BIN_DIR) ] || mkdir -p $(BIN_DIR)
-	$(CC) $(LDFLAGS) -dynamiclib -install_name "/usr/local/lib/$(notdir $@)" -o $@ $^
-
-$(LZFSE_AR): $(LZFSE_OBJ)
-	@[ -d $(BIN_DIR) ] || mkdir -p $(BIN_DIR)
-	ar rvs $@ $^
+	$(LD) -r -o $(OBJ_DIR)/liblzfse_master.o $(LIB_OBJS)
+	ar rvs $@ $(OBJ_DIR)/liblzfse_master.o
 
 $(LZFSE_CMD): $(CMD_OBJS) $(LZFSE_LIB)
 	@[ -d $(BIN_DIR) ] || mkdir -p $(BIN_DIR)
